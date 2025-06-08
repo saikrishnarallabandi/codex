@@ -29,4 +29,22 @@ describe("approximateTokensUsed", () => {
     ];
     expect(approximateTokensUsed(items)).toBe(2); // ceil(5/4)
   });
+
+  it("handles missing text or refusal fields", () => {
+    const items: Array<ResponseItem> = [
+      {
+        id: "1",
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [
+          { type: "output_text", text: undefined as unknown as string },
+          { type: "refusal", refusal: undefined as unknown as string },
+        ],
+      } as ResponseItem,
+    ];
+
+    expect(() => approximateTokensUsed(items)).not.toThrow();
+    expect(approximateTokensUsed(items)).toBe(0);
+  });
 });
