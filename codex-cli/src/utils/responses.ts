@@ -6,6 +6,7 @@ import type {
 
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
+import { createInterface } from "node:readline";
 
 // Define interfaces based on OpenAI API documentation
 type ResponseCreateInput = ResponseCreateParams;
@@ -186,23 +187,21 @@ function callCustomLLM(messages: any): AsyncIterable<any> {
   child.stdin.write(JSON.stringify(messages));
   child.stdin.end();
 
+  const rl = createInterface({ input: child.stdout as Readable });
+
   async function* generator() {
-    let buffer = "";
-    for await (const chunk of child.stdout as Readable) {
-      buffer += chunk.toString();
-      let newlineIndex;
-      while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, newlineIndex);
-        buffer = buffer.slice(newlineIndex + 1);
-        if (line.trim() !== "") {
-          try {
-            yield JSON.parse(line);
-          } catch {
-            // Ignore malformed JSON lines
-          }
-        }
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+      try {
+        yield JSON.parse(trimmed);
+      } catch {
+        // Ignore malformed JSON lines
       }
     }
+    rl.close();
   }
 
   return { [Symbol.asyncIterator]: generator } as AsyncIterable<any>;
