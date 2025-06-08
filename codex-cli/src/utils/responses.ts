@@ -6,6 +6,8 @@ import type {
 
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 // Define interfaces based on OpenAI API documentation
 type ResponseCreateInput = ResponseCreateParams;
@@ -180,9 +182,11 @@ function generateId(prefix: string = "msg"): string {
 }
 
 function callCustomLLM(messages: any): AsyncIterable<any> {
-  const child = spawn("python", [
-    "/home2/srallaba/projects/project_codex/scripts/call_gpt.py",
-  ]);
+  const scriptPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../scripts/call_gpt.py",
+  );
+  const child = spawn("python", [scriptPath]);
   child.stdin.write(JSON.stringify(messages));
   child.stdin.end();
 
