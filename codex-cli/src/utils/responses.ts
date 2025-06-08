@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { createInterface } from "node:readline";
 
 // Define interfaces based on OpenAI API documentation
 type ResponseCreateInput = ResponseCreateParams;
