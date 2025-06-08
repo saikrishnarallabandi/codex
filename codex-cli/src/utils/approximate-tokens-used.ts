@@ -25,9 +25,9 @@ export function approximateTokensUsed(items: Array<ResponseItem>): number {
 
         for (const c of item.content) {
           if (c.type === "input_text" || c.type === "output_text") {
-            charCount += c.text.length;
+            charCount += c.text?.length ?? 0;
           } else if (c.type === "refusal") {
-            charCount += c.refusal.length;
+            charCount += c.refusal?.length ?? 0;
           } else if (c.type === "input_file") {
             charCount += c.filename?.length ?? 0;
           }
