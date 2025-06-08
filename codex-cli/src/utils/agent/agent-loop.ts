@@ -22,7 +22,10 @@ import {
 } from "../config.js";
 import { log } from "../logger/log.js";
 import { parseToolCallArguments } from "../parsers.js";
-import { responsesCreateViaChatCompletions } from "../responses.js";
+import {
+  responsesCreateViaChatCompletions,
+  callCustomLLM,
+} from "../responses.js";
 import {
   ORIGIN,
   getSessionId,
@@ -32,12 +35,8 @@ import {
 import { applyPatchToolInstructions } from "./apply-patch.js";
 import { handleExecCommand } from "./handle-exec-command.js";
 import { HttpsProxyAgent } from "https-proxy-agent";
-
 import OpenAI, { APIConnectionTimeoutError, AzureOpenAI } from "openai";
 import { randomUUID } from "crypto";
-
-import { callCustomLLM } from "/home2/srallaba/projects/project_codex/repos/codex/codex-cli/src/utils/responses"
-
 // Wait time before retrying after rate limit errors (ms).
 const RATE_LIMIT_RETRY_WAIT_MS = parseInt(
   process.env["OPENAI_RATE_LIMIT_RETRY_WAIT_MS"] || "500",
