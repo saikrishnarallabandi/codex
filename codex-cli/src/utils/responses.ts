@@ -6,7 +6,6 @@ import type {
 
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
-import { createInterface } from "node:readline";
 
 // Define interfaces based on OpenAI API documentation
 type ResponseCreateInput = ResponseCreateParams;
@@ -202,6 +201,7 @@ function callCustomLLM(messages: any): AsyncIterable<any> {
       }
     }
     rl.close();
+
   }
 
   return { [Symbol.asyncIterator]: generator } as AsyncIterable<any>;
