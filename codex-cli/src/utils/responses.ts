@@ -4,7 +4,8 @@ import type {
   Response,
 } from "openai/resources/responses/responses";
 
-import { execFile } from "child_process";
+import { spawn } from "node:child_process";
+import { Readable } from "node:stream";
 
 // Define interfaces based on OpenAI API documentation
 type ResponseCreateInput = ResponseCreateParams;
@@ -178,24 +179,33 @@ function generateId(prefix: string = "msg"): string {
   return `${prefix}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
-function callCustomLLM(messages: any): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      "python", 
-      ['/home2/srallaba/projects/project_codex/scripts/call_gpt.py'],
-      {}, 
-      (err, stdout) => {
-      if (err) return reject(err);
-      try{
-          resolve(JSON.parse(stdout));
-      } catch (e) {
-        reject(new Error("Invalid JSON: " + stdout));
+function callCustomLLM(messages: any): AsyncIterable<any> {
+  const child = spawn("python", [
+    "/home2/srallaba/projects/project_codex/scripts/call_gpt.py",
+  ]);
+  child.stdin.write(JSON.stringify(messages));
+  child.stdin.end();
+
+  async function* generator() {
+    let buffer = "";
+    for await (const chunk of child.stdout as Readable) {
+      buffer += chunk.toString();
+      let newlineIndex;
+      while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line.trim() !== "") {
+          try {
+            yield JSON.parse(line);
+          } catch {
+            // Ignore malformed JSON lines
+          }
+        }
       }
     }
-  );
-  child.stdin?.write(JSON.stringify(messages));
-  child.stdin?.end();
-  });
+  }
+
+  return { [Symbol.asyncIterator]: generator } as AsyncIterable<any>;
 }
 
 // Function to convert ResponseInputItem to ChatCompletionMessageParam
@@ -736,5 +746,5 @@ export {
   ResponseCreateInput,
   ResponseOutput,
   ResponseEvent,
-  callCustomLLM
+  callCustomLLM,
 };
