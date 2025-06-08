@@ -4,6 +4,8 @@ import type {
   Response,
 } from "openai/resources/responses/responses";
 
+import { execFile } from "child_process";
+
 // Define interfaces based on OpenAI API documentation
 type ResponseCreateInput = ResponseCreateParams;
 type ResponseOutput = Response;
@@ -176,6 +178,26 @@ function generateId(prefix: string = "msg"): string {
   return `${prefix}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
+function callCustomLLM(messages: any): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      "python", 
+      ['/home2/srallaba/projects/project_codex/scripts/call_gpt.py'],
+      {}, 
+      (err, stdout) => {
+      if (err) return reject(err);
+      try{
+          resolve(JSON.parse(stdout));
+      } catch (e) {
+        reject(new Error("Invalid JSON: " + stdout));
+      }
+    }
+  );
+  child.stdin?.write(JSON.stringify(messages));
+  child.stdin?.end();
+  });
+}
+
 // Function to convert ResponseInputItem to ChatCompletionMessageParam
 type ResponseInputItem = ResponseCreateInput["input"][number];
 
@@ -285,7 +307,7 @@ const createCompletion = (openai: OpenAI, input: ResponseCreateInput) => {
     metadata: input.metadata,
   };
 
-  return openai.chat.completions.create(chatInput);
+  return callCustomLLM(chatInput);
 };
 
 // Main function with overloading
@@ -714,4 +736,5 @@ export {
   ResponseCreateInput,
   ResponseOutput,
   ResponseEvent,
+  callCustomLLM
 };
