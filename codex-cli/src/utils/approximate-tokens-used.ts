@@ -42,7 +42,7 @@ export function approximateTokensUsed(items: Array<ResponseItem>): number {
       }
 
       case "function_call_output": {
-        charCount += item.output.length;
+        charCount += item.output?.length ?? 0;
         break;
       }
 

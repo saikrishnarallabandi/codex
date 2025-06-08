@@ -6,6 +6,8 @@ import type {
 
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 // Define interfaces based on OpenAI API documentation
 type ResponseCreateInput = ResponseCreateParams;
@@ -180,29 +182,30 @@ function generateId(prefix: string = "msg"): string {
 }
 
 function callCustomLLM(messages: any): AsyncIterable<any> {
-  const child = spawn("python", [
-    "/home2/srallaba/projects/project_codex/scripts/call_gpt.py",
-  ]);
+  const scriptPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../scripts/call_gpt.py",
+  );
+  const child = spawn("python", [scriptPath]);
   child.stdin.write(JSON.stringify(messages));
   child.stdin.end();
 
+  const rl = createInterface({ input: child.stdout as Readable });
+
   async function* generator() {
-    let buffer = "";
-    for await (const chunk of child.stdout as Readable) {
-      buffer += chunk.toString();
-      let newlineIndex;
-      while ((newlineIndex = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, newlineIndex);
-        buffer = buffer.slice(newlineIndex + 1);
-        if (line.trim() !== "") {
-          try {
-            yield JSON.parse(line);
-          } catch {
-            // Ignore malformed JSON lines
-          }
-        }
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+      try {
+        yield JSON.parse(trimmed);
+      } catch {
+        // Ignore malformed JSON lines
       }
     }
+    rl.close();
+
   }
 
   return { [Symbol.asyncIterator]: generator } as AsyncIterable<any>;
