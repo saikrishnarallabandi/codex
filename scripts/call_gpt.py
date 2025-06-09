@@ -64,6 +64,7 @@ async def main():
     model = "gpt-4o-mini"
     llm = InvokeGPT(model=model)
 
+
     try:
         stream = llm.get_response(
             messages,
