@@ -53,23 +53,25 @@ class InvokeGPT:
         if not openai.api_key:
             openai.api_key = os.environ.get("OPENAI_API_KEY", "")
 
-    def get_response(self, messages=None, tools=None, stream=False, tool_choice="auto", model=None):
-        
-        with open('log.out', 'a') as f:
-            f.write("Starting get_response in InvokeGPT" + '\n')
+    async def get_response(self, messages=None, tools=None, stream=False, tool_choice="auto", model=None):
+
+        with open("log.out", "a") as f:
+            f.write("Starting get_response in InvokeGPT\n")
         if messages is None:
             messages = self.messages
         else:
             self.messages = messages
 
-        response = openai.ChatCompletion.acreate(
-            model=self.model,
+        wrapped_tools = [wrap_tool_definition(t) for t in tools] if tools else None
+
+        response = await openai.ChatCompletion.acreate(
+            model=self.model if model is None else model,
             messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            stream=True
+            tools=wrapped_tools,
+            tool_choice=tool_choice,
+            stream=stream,
         )
-        with open('log.out', 'a') as f:
-            f.write("Response received from OpenAI" + '\n')
-                
+        with open("log.out", "a") as f:
+            f.write("Response received from OpenAI\n")
+
         return response
