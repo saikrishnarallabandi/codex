@@ -1,150 +1,164 @@
-import sys
+#!/usr/bin/env python3
 import json
+import sys
 import asyncio
+import subprocess
+
 from invoke_llm import InvokeGPT
-import collections.abc
 
-llm = InvokeGPT()
-model_name = "cody"
-
-# Reset logs
-open("log.out", "w").close()
-
-def convert_input_messages(raw_input):
-    return [
-        {
-            "role": msg["role"],
-            "content": next((c["text"] for c in msg["content"] if c["type"] == "input_text"), "")
-        }
-        for msg in raw_input
-    ]
-
-def wrap_tool_definition(tool):
-    if tool.get("type") == "function" and "name" in tool:
-        return {
-            "type": "function",
-            "function": {
-                "name": tool["name"],
-                "description": tool.get("description", ""),
-                "parameters": tool.get("parameters", {})
-            }
-        }
-    return tool
-
-def log(msg):
+def log(msg: str) -> None:
     with open("log.out", "a") as f:
-        f.write(msg + '\n')
+        f.write(msg + "\n")
 
 async def main():
-    input_data_str = sys.stdin.read()
-    with open("log.in", "w") as f:
-        f.write("Input JSON:\n" + input_data_str + "\n")
+    open("log.out", "w").close()
+    data_str = sys.stdin.read()
+    if not data_str:
+        sys.stderr.write("Expected request JSON on stdin\n")
+        return
     log("[✓] Read input data from stdin")
-    log(input_data_str + "\n")    
-
+    log(data_str)
     try:
-        input_data = json.loads(input_data_str)
+        request = json.loads(data_str)
         log("[✓] Parsed JSON successfully")
     except Exception as e:
-        log(f"[ERROR] JSON parsing failed: {str(e)}")
+        log(f"[ERROR] JSON parsing failed: {e}")
+        sys.stderr.write("Expected request JSON on stdin\n")
         return
+    instructions = request.get("instructions", "")
+    messages = [
+        {"role": "system", "content": instructions}
+    ]
+    for item in request.get("input", []):
+        if item.get("role") == "user":
+            for part in item.get("content", []):
+                if isinstance(part, dict) and part.get("type") == "input_text":
+                    messages.append({"role": "user", "content": part.get("text", "")})
+                    break
+    log("[✓] Built message list")
 
-    input_messages_raw = input_data.get("input", [])
-    messages = convert_input_messages(input_messages_raw)
-    instructions = input_data.get("instructions", "").strip()
-    messages.insert(0, { "role": "system", "content": instructions })
+    gpt = InvokeGPT()
+    chat_resp = await gpt.get_response(
+        messages,
+        tools=request.get("tools"),
+        model=request.get("model"),
+    )
+    log("[✓] Received base reply")
 
-    tools = input_data.get("tools", [])
-    wrapped_tools = [wrap_tool_definition(tool) for tool in tools]
+    resp_id = "resp_mock"
+    msg_id = "msg_1"
 
-    model = input_data.get("model", "gpt-4")
-    tool_choice = input_data.get("tool_choice", "auto")
+    call = chat_resp["choices"][0]["message"]["tool_calls"][0]
+    func_id = call["id"]
+    call_id = call["id"]
+    args = call["function"]["arguments"]
 
-    log(f"[✓] Sending request to model={model}")
-    log(f"[✓] Messages:\n{json.dumps(messages, indent=2)}")
+    async def emit(evt):
+        log(f"[→] {evt.get('type')}")
+        print(json.dumps(evt), flush=True)
+        await asyncio.sleep(0.05)
+
+    await emit({"type": "response.created", "response": {"id": resp_id, "status": "in_progress"}})
+    await emit({"type": "response.in_progress", "response": {"id": resp_id, "status": "in_progress"}})
+
+    await emit({
+        "type": "response.output_item.added",
+        "output_index": 0,
+        "item": {"type": "function_call", "id": func_id, "status": "in_progress", "call_id": call_id, "name": "shell", "arguments": ""},
+    })
+    await emit({
+        "type": "response.function_call_arguments.delta",
+        "item_id": func_id,
+        "output_index": 0,
+        "content_index": 0,
+        "delta": args,
+    })
+    await emit({
+        "type": "response.function_call_arguments.done",
+        "item_id": func_id,
+        "output_index": 0,
+        "content_index": 0,
+        "arguments": args,
+    })
+    await emit({
+        "type": "response.output_item.done",
+        "output_index": 0,
+        "item": {"type": "function_call", "id": func_id, "status": "completed", "call_id": call_id, "name": "shell", "arguments": args},
+    })
 
     try:
-        response_stream = await llm.get_response(
-            messages,
-            tools=wrapped_tools,
-            stream=True,
-            tool_choice=tool_choice,
-            model=model
-        )
+        call_args = json.loads(args)
+        cmd = call_args.get("command", [])
+        workdir = call_args.get("workdir")
+        timeout = call_args.get("timeout")
+    except Exception:
+        cmd = []
+        workdir = None
+        timeout = None
 
-        log("[✓] Started response stream")
+    if isinstance(cmd, list):
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=workdir,
+                timeout=(timeout / 1000) if isinstance(timeout, (int, float)) else None,
+                capture_output=True,
+                text=True,
+            )
+            result = proc.stdout.strip()
+        except Exception as e:
+            result = str(e)
+    else:
+        result = ""
 
-        full_content = ""
+    messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
+    chat_resp2 = await gpt.get_response(
+        messages,
+        tools=request.get("tools"),
+        model=request.get("model"),
+    )
+    text = chat_resp2["choices"][0]["message"]["content"]
+    log(f"[✓] Built final text: {text}")
 
-        async for chunk in response_stream:
-            if hasattr(chunk, "to_dict"):
-                chunk = chunk.to_dict()
+    await emit({
+        "type": "response.output_item.added",
+        "output_index": 1,
+        "item": {"type": "message", "id": msg_id, "status": "in_progress", "role": "assistant", "content": [{"type": "output_text", "text": ""}]},
+    })
+    await emit({
+        "type": "response.output_text.delta",
+        "item_id": msg_id,
+        "output_index": 1,
+        "content_index": 0,
+        "delta": text,
+    })
+    await emit({
+        "type": "response.output_text.done",
+        "item_id": msg_id,
+        "output_index": 1,
+        "content_index": 0,
+        "text": text,
+    })
+    await emit({
+        "type": "response.output_item.done",
+        "output_index": 1,
+        "item": {"type": "message", "id": msg_id, "status": "completed", "role": "assistant", "content": [{"type": "output_text", "text": text}]},
+    })
 
-            log(f"[→] Chunk: {repr(chunk)}")
-
-            choices = chunk.get("choices", [])
-            if not choices:
-                continue
-
-            delta = choices[0].get("delta", {})
-
-            # ✅ Handle tool calls safely
-            if "tool_calls" in delta:
-                for tool_call_raw in delta["tool_calls"]:
-                    tool_call = tool_call_raw.to_dict() if hasattr(tool_call_raw, "to_dict") else tool_call_raw
-                    tool_id = tool_call.get("id", "tool_call")
-                    function = tool_call.get("function", {})
-                    tool_name = function.get("name", "")
-                    arguments = function.get("arguments", "")
-
-                    print(json.dumps({
-                        "type": "response.output_item.done",
-                        "item": {
-                            "type": "function_call",
-                            "id": tool_id,
-                            "name": tool_name,
-                            "arguments": arguments
-                        }
-                    }), flush=True)
-
-            # ✅ Handle content
-            content_piece = delta.get("content")
-            if content_piece is not None:
-                full_content += content_piece
-                #print(json.dumps({
-                #    "type": "response.output_item.done",
-                #    "item": {
-                #        "type": "message",
-                #        "role": "assistant",
-                #        "content": [
-                #            { "type": "output_text", "text": content_piece }
-                #        ]
-                #    }
-                #}), flush=True)
-
-        if not full_content:
-            raise Exception("No content accumulated from stream")
-
-        # Final signal that the response is complete
-        print(json.dumps({
-            "type": "response.completed",
-            "response": {
-                "id": "final",
-                "status": "completed",
-                "output": [
-                    {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [
-                            { "type": "output_text", "text": full_content }
-                        ]
-                    }
-                ]
-            }
-        }), flush=True)
-
-    except Exception as e:
-        log(f"[ERROR] During LLM call or output formatting: {str(e)}")
+    await emit({
+        "type": "response.completed",
+        "response": {
+            "id": resp_id,
+            "status": "completed",
+            "model": chat_resp2["model"],
+            "output": [
+                {"type": "function_call", "id": func_id, "status": "completed", "call_id": call_id, "name": "shell", "arguments": args},
+                {"type": "message", "id": msg_id, "status": "completed", "role": "assistant", "content": [{"type": "output_text", "text": text}]},
+            ],
+            "parallel_tool_calls": False,
+        },
+    })
+    log("[✓] Response completed")
 
 if __name__ == "__main__":
     asyncio.run(main())
