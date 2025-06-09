@@ -132,7 +132,6 @@ export class AgentLoop {
   // type to avoid sprinkling `any` across the implementation while still allowing paths where
   // the OpenAI SDK types may not perfectly match. The `typeof OpenAI` pattern captures the
   // instance shape without resorting to `any`.
-  private oai: OpenAI;
 
   private onItem: (item: ResponseItem) => void;
   private onLoading: (loading: boolean) => void;
@@ -313,13 +312,7 @@ export class AgentLoop {
     const apiKey = this.config.apiKey ?? process.env["OPENAI_API_KEY"] ?? "";
     const baseURL = getBaseUrl(this.provider);
 
-    this.oai = new OpenAI({
-      // The OpenAI JS SDK only requires `apiKey` when making requests against
-      // the official API.  When running unit‑tests we stub out all network
-      // calls so an undefined key is perfectly fine.  We therefore only set
-      // the property if we actually have a value to avoid triggering runtime
-      // errors inside the SDK (it validates that `apiKey` is a non‑empty
-      // string when the field is present).
+    const oaiConfig = {
       ...(apiKey ? { apiKey } : {}),
       baseURL,
       defaultHeaders: {
@@ -333,25 +326,16 @@ export class AgentLoop {
       },
       httpAgent: PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : undefined,
       ...(timeoutMs !== undefined ? { timeout: timeoutMs } : {}),
-    });
+    };
 
     if (this.provider.toLowerCase() === "azure") {
-      this.oai = new AzureOpenAI({
+      new AzureOpenAI({
+        ...oaiConfig,
         apiKey,
-        baseURL,
         apiVersion: AZURE_OPENAI_API_VERSION,
-        defaultHeaders: {
-          originator: ORIGIN,
-          version: CLI_VERSION,
-          session_id: this.sessionId,
-          ...(OPENAI_ORGANIZATION
-            ? { "OpenAI-Organization": OPENAI_ORGANIZATION }
-            : {}),
-          ...(OPENAI_PROJECT ? { "OpenAI-Project": OPENAI_PROJECT } : {}),
-        },
-        httpAgent: PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : undefined,
-        ...(timeoutMs !== undefined ? { timeout: timeoutMs } : {}),
       });
+    } else {
+      new OpenAI(oaiConfig);
     }
 
     setSessionId(this.sessionId);
@@ -809,7 +793,6 @@ export class AgentLoop {
                     callCustomLLM(params)
                 : (params: ResponseCreateParams) =>
                     responsesCreateViaChatCompletions(
-                      this.oai,
                       params as ResponseCreateParams & { stream: true },
                     );
             log(
@@ -1195,11 +1178,10 @@ export class AgentLoop {
                 this.config.provider?.toLowerCase() === "cody"
                   ? (params: ResponseCreateParams) =>
                       callCustomLLM(params)
-                  : (params: ResponseCreateParams) =>
-                      responsesCreateViaChatCompletions(
-                        this.oai,
-                        params as ResponseCreateParams & { stream: true },
-                      );
+                : (params: ResponseCreateParams) =>
+                    responsesCreateViaChatCompletions(
+                      params as ResponseCreateParams & { stream: true },
+                    );
 
               log(
                 "agentLoop.run(): responseCall(1): turnInput: " +

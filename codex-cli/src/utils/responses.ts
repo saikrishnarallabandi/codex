@@ -1,14 +1,15 @@
-import path from "path";
-import { fileURLToPath } from "url";
-import { spawn } from "child_process";
-import { createInterface } from "readline";
-import type { Readable } from "stream";
 import type { OpenAI } from "openai";
 import type {
   ResponseCreateParams,
   Response,
 } from "openai/resources/responses/responses";
+import type { Readable } from "stream";
+
 import { log } from "./logger/log.js";
+import { spawn } from "child_process";
+import path from "path";
+import { createInterface } from "readline";
+import { fileURLToPath } from "url";
 
 // Define interfaces based on OpenAI API documentation
 type ResponseCreateInput = ResponseCreateParams;
@@ -267,7 +268,7 @@ function convertTools(
     }));
 }
 
-const createCompletion = (openai: OpenAI, input: ResponseCreateInput) => {
+const createCompletion = (input: ResponseCreateInput) => {
   const fullMessages = getFullMessages(input);
   const chatTools = convertTools(input.tools);
   const webSearchOptions = input.tools?.some(
@@ -296,18 +297,15 @@ const createCompletion = (openai: OpenAI, input: ResponseCreateInput) => {
 
 // Main function with overloading
 async function responsesCreateViaChatCompletions(
-  openai: OpenAI,
   input: ResponseCreateInput & { stream: true },
 ): Promise<AsyncGenerator<ResponseEvent>>;
 async function responsesCreateViaChatCompletions(
-  openai: OpenAI,
   input: ResponseCreateInput & { stream?: false },
 ): Promise<ResponseOutput>;
 async function responsesCreateViaChatCompletions(
-  openai: OpenAI,
   input: ResponseCreateInput,
 ): Promise<ResponseOutput | AsyncGenerator<ResponseEvent>> {
-  const completion = await createCompletion(openai, input);
+  const completion = await createCompletion(input);
   if (input.stream) {
     return streamResponses(
       input,
@@ -716,7 +714,7 @@ async function* streamResponses(
 }
 
 
-function callCustomLLM(messages: any): AsyncIterable<any> {
+function callCustomLLM(messages: unknown): AsyncIterable<unknown> {
   const scriptPath = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     "../../scripts/call_gpt.py",
@@ -744,7 +742,9 @@ function callCustomLLM(messages: any): AsyncIterable<any> {
 
   }
 
-  return { [Symbol.asyncIterator]: generator } as AsyncIterable<any>;
+  return {
+    [Symbol.asyncIterator]: generator,
+  } as AsyncIterable<unknown>;
 }
 
 export {
