@@ -1,14 +1,14 @@
+import path from "path";
+import { fileURLToPath } from "url";
+import { spawn } from "child_process";
+import { createInterface } from "readline";
+import type { Readable } from "stream";
 import type { OpenAI } from "openai";
 import type {
   ResponseCreateParams,
   Response,
 } from "openai/resources/responses/responses";
-
-import { spawn } from "node:child_process";
-import { Readable } from "node:stream";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-import { createInterface } from "node:readline";
+import { log } from "./logger/log.js";
 
 // Define interfaces based on OpenAI API documentation
 type ResponseCreateInput = ResponseCreateParams;
@@ -180,36 +180,6 @@ const conversationHistories = new Map<
 // Utility function to generate unique IDs
 function generateId(prefix: string = "msg"): string {
   return `${prefix}_${Math.random().toString(36).substr(2, 9)}`;
-}
-
-function callCustomLLM(messages: any): AsyncIterable<any> {
-  const scriptPath = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    "../../scripts/call_gpt.py",
-  );
-  const child = spawn("python", [scriptPath]);
-  child.stdin.write(JSON.stringify(messages));
-  child.stdin.end();
-
-  const rl = createInterface({ input: child.stdout as Readable });
-
-  async function* generator() {
-    for await (const line of rl) {
-      const trimmed = line.trim();
-      if (!trimmed) {
-        continue;
-      }
-      try {
-        yield JSON.parse(trimmed);
-      } catch {
-        // Ignore malformed JSON lines
-      }
-    }
-    rl.close();
-
-  }
-
-  return { [Symbol.asyncIterator]: generator } as AsyncIterable<any>;
 }
 
 // Function to convert ResponseInputItem to ChatCompletionMessageParam
@@ -743,6 +713,38 @@ async function* streamResponses(
 
     yield { type: "response.completed", response: finalResponse };
   }
+}
+
+
+function callCustomLLM(messages: any): AsyncIterable<any> {
+  const scriptPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../scripts/call_gpt.py",
+  );
+  const child = spawn("python", [scriptPath]);
+  child.stdin.write(JSON.stringify(messages));
+  child.stdin.end();
+
+  const rl = createInterface({ input: child.stdout as Readable });
+
+  async function* generator() {
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        continue;
+      }
+      try {
+        log(`Received line: ${trimmed}`);
+        yield JSON.parse(trimmed);
+      } catch {
+        log(`Failed to parse line: ${trimmed}`);
+      }
+    }
+    rl.close();
+
+  }
+
+  return { [Symbol.asyncIterator]: generator } as AsyncIterable<any>;
 }
 
 export {
