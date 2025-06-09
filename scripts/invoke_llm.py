@@ -53,6 +53,7 @@ class InvokeGPT:
         if not openai.api_key:
             openai.api_key = os.environ.get("OPENAI_API_KEY", "")
 
+
     def get_response(self, messages=None, tools=None, stream=False, tool_choice="auto", model=None):
 
         with open("log.out", "a") as f:
