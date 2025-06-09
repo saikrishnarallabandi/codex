@@ -22,3 +22,13 @@ declare module "fast-npm-meta" {
 declare module "semver" {
   export function gt(v1: string, v2: string): boolean;
 }
+
+declare module "cross-spawn" {
+  import type { ChildProcess, SpawnOptions } from "child_process";
+  function crossSpawn(
+    command: string,
+    args?: ReadonlyArray<string>,
+    options?: SpawnOptions,
+  ): ChildProcess;
+  export = crossSpawn;
+}
