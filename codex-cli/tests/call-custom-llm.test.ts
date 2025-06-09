@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 import { callCustomLLM } from "../src/utils/responses";
 import { Readable } from "node:stream";
 import { spawn } from "node:child_process";
@@ -14,7 +14,7 @@ describe("callCustomLLM", () => {
 
   it("yields parsed JSON lines from stdout", async () => {
     const fakeStdout = new Readable({ read() {} });
-    (spawn as unknown as vi.Mock).mockReturnValue({
+  (spawn as unknown as Mock).mockReturnValue({
       stdout: fakeStdout,
       stdin: { write: vi.fn(), end: vi.fn() },
     });
