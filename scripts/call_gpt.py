@@ -137,12 +137,14 @@ async def main():
                     "type": "response.output_item.done",
                     "item": {
                         "type": "message",
+                        "id": gen_id("msg"),
                         "role": "assistant",
                         "content": [{"type": "output_text", "text": text_content}],
                     },
                 })
                 final_output.append({
                     "type": "message",
+                    "id": gen_id("msg"),
                     "role": "assistant",
                     "content": [{"type": "output_text", "text": text_content}],
                 })
