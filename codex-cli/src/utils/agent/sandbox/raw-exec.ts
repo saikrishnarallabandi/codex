@@ -74,6 +74,9 @@ export function exec(
     StdioPipe
   > = {
     ...options,
+    // Ensure the command runs through the shell so built-ins like `ls`
+    // resolve correctly even when not available as standalone executables.
+    shell: true,
     // Inherit any caller‑supplied stdio flags but force stdin to "ignore" so
     // the child never attempts to read from us (see lengthy comment above).
     stdio: ["ignore", "pipe", "pipe"],
