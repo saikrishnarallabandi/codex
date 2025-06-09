@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import os
 import sys
 import asyncio
 import uuid
@@ -34,6 +35,11 @@ def gen_id(prefix: str) -> str:
 
 async def main():
     open("log.out", "w").close()
+
+    if not os.environ.get("OPENAI_API_KEY"):
+        log("[ERROR] OPENAI_API_KEY not set")
+        return
+
     data_str = sys.stdin.read()
     if not data_str:
         sys.stderr.write("Expected request JSON on stdin\n")
@@ -59,12 +65,18 @@ async def main():
                     break
     log("[✓] Built message list")
 
-    gpt = InvokeGPT()
-    chat_resp = await gpt.get_response(
+    wrapped_tools = request.get("tools")
+    tool_choice = request.get("tool_choice", "auto")
+
+    model = "gpt-4o-mini"
+    gpt = InvokeGPT(model=model)
+    chat_resp = gpt.get_response(
         messages,
         tools=request.get("tools"),
-        model=request.get("model"),
+        model=model,
     )
+    if hasattr(chat_resp, "to_dict"):
+        chat_resp = chat_resp.to_dict()
     log("[✓] Received base reply")
 
     resp_id = "resp_mock"
@@ -109,7 +121,7 @@ async def main():
     })
 
     try:
-        stream = await llm.get_response(
+        stream = llm.get_response(
             messages,
             tools=wrapped_tools,
             stream=True,
@@ -132,7 +144,7 @@ async def main():
         text_content = ""
         final_output = []
 
-        async for chunk in stream:
+        for chunk in stream:
             if hasattr(chunk, "to_dict"):
                 chunk = chunk.to_dict()
 
