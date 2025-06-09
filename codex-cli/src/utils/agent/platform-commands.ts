@@ -19,6 +19,21 @@ const COMMAND_MAP: Record<string, string> = {
 };
 
 /**
+ * List of commands that are built into `cmd.exe` on Windows. These do not
+ * correspond to standalone executables, meaning they must be executed through
+ * the shell.
+ */
+const CMD_BUILTINS = new Set([
+  "dir",
+  "copy",
+  "move",
+  "del",
+  "type",
+  "echo.>",
+  "md",
+]);
+
+/**
  * Map of common Unix command options to their Windows equivalents
  */
 const OPTION_MAP: Record<string, Record<string, string>> = {
@@ -77,6 +92,11 @@ export function adaptCommandForPlatform(command: Array<string>): Array<string> {
   }
 
   log(`Adapted command: ${adaptedCommand.join(" ")}`);
+
+  if (CMD_BUILTINS.has(adaptedCommand[0])) {
+    // Wrap built-in commands so that `spawn` executes them via cmd.exe
+    return ["cmd.exe", "/c", ...adaptedCommand];
+  }
 
   return adaptedCommand;
 }

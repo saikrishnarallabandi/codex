@@ -11,7 +11,7 @@ import type {
 import { log } from "../../logger/log.js";
 import { adaptCommandForPlatform } from "../platform-commands.js";
 import { createTruncatingCollector } from "./create-truncating-collector";
-import { spawn } from "child_process";
+import crossSpawn from "cross-spawn";
 import * as os from "os";
 
 /**
@@ -84,7 +84,11 @@ export function exec(
     detached: true,
   };
 
-  const child: ChildProcess = spawn(prog, adaptedCommand.slice(1), fullOptions);
+  const child: ChildProcess = crossSpawn(
+    prog,
+    adaptedCommand.slice(1),
+    fullOptions,
+  );
   // If an AbortSignal is provided, ensure the spawned process is terminated
   // when the signal is triggered so that cancellations propagate down to any
   // long‑running child processes. We default to SIGTERM to give the process a
