@@ -5,10 +5,6 @@ import sys
 import asyncio
 import uuid
 from invoke_llm import InvokeGPT
-import collections.abc
-
-llm = InvokeGPT()
-model_name = "cody"
 
 # Reset logs
 open("log.out", "w").close()
@@ -22,9 +18,6 @@ def convert_input_messages(raw_input):
         for msg in raw_input
     ]
 
-import subprocess
-
-from invoke_llm import InvokeGPT
 
 def log(msg: str) -> None:
     with open("log.out", "a") as f:
@@ -69,56 +62,8 @@ async def main():
     tool_choice = request.get("tool_choice", "auto")
 
     model = "gpt-4o-mini"
-    gpt = InvokeGPT(model=model)
-    chat_resp = gpt.get_response(
-        messages,
-        tools=request.get("tools"),
-        model=model,
-    )
-    if hasattr(chat_resp, "to_dict"):
-        chat_resp = chat_resp.to_dict()
-    log("[✓] Received base reply")
+    llm = InvokeGPT(model=model)
 
-    resp_id = "resp_mock"
-    msg_id = "msg_1"
-
-    call = chat_resp["choices"][0]["message"]["tool_calls"][0]
-    func_id = call["id"]
-    call_id = call["id"]
-    args = call["function"]["arguments"]
-
-    async def emit(evt):
-        log(f"[→] {evt.get('type')}")
-        print(json.dumps(evt), flush=True)
-        await asyncio.sleep(0.05)
-
-    await emit({"type": "response.created", "response": {"id": resp_id, "status": "in_progress"}})
-    await emit({"type": "response.in_progress", "response": {"id": resp_id, "status": "in_progress"}})
-
-    await emit({
-        "type": "response.output_item.added",
-        "output_index": 0,
-        "item": {"type": "function_call", "id": func_id, "status": "in_progress", "call_id": call_id, "name": "shell", "arguments": ""},
-    })
-    await emit({
-        "type": "response.function_call_arguments.delta",
-        "item_id": func_id,
-        "output_index": 0,
-        "content_index": 0,
-        "delta": args,
-    })
-    await emit({
-        "type": "response.function_call_arguments.done",
-        "item_id": func_id,
-        "output_index": 0,
-        "content_index": 0,
-        "arguments": args,
-    })
-    await emit({
-        "type": "response.output_item.done",
-        "output_index": 0,
-        "item": {"type": "function_call", "id": func_id, "status": "completed", "call_id": call_id, "name": "shell", "arguments": args},
-    })
 
     try:
         stream = llm.get_response(
@@ -187,7 +132,7 @@ async def main():
                         "arguments": tc["arguments"],
                     })
 
-            if finish_reason == "stop":
+            if finish_reason == "stop" and text_content:
                 emit({
                     "type": "response.output_item.done",
                     "item": {
