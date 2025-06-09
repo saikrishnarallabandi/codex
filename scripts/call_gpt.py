@@ -1,6 +1,7 @@
 import sys
 import json
 import asyncio
+import uuid
 from invoke_llm import InvokeGPT
 import collections.abc
 
@@ -35,6 +36,9 @@ def log(msg):
     with open("log.out", "a") as f:
         f.write(msg + '\n')
 
+def gen_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:8]}"
+
 async def main():
     input_data_str = sys.stdin.read()
     with open("log.in", "w") as f:
@@ -64,87 +68,98 @@ async def main():
     log(f"[✓] Messages:\n{json.dumps(messages, indent=2)}")
 
     try:
-        response_stream = await llm.get_response(
+        stream = await llm.get_response(
             messages,
             tools=wrapped_tools,
             stream=True,
             tool_choice=tool_choice,
-            model=model
+            model=model,
         )
 
         log("[✓] Started response stream")
 
-        full_content = ""
+        resp_id = gen_id("resp")
 
-        async for chunk in response_stream:
+        def emit(evt):
+            print(json.dumps(evt), flush=True)
+            log(f"[→] {evt.get('type')}")
+
+        emit({"type": "response.created", "response": {"id": resp_id, "status": "in_progress"}})
+        emit({"type": "response.in_progress", "response": {"id": resp_id, "status": "in_progress"}})
+
+        tool_calls = {}
+        text_content = ""
+        final_output = []
+
+        async for chunk in stream:
             if hasattr(chunk, "to_dict"):
                 chunk = chunk.to_dict()
 
             log(f"[→] Chunk: {repr(chunk)}")
 
-            choices = chunk.get("choices", [])
-            if not choices:
-                continue
+            choice = chunk.get("choices", [{}])[0]
+            delta = choice.get("delta", {})
+            finish_reason = choice.get("finish_reason")
 
-            delta = choices[0].get("delta", {})
+            for tc in delta.get("tool_calls", []):
+                idx = tc.get("index", 0)
+                call = tool_calls.setdefault(idx, {
+                    "id": tc.get("id", gen_id("call")),
+                    "name": tc.get("function", {}).get("name", ""),
+                    "arguments": "",
+                })
+                if tc.get("function", {}).get("name"):
+                    call["name"] = tc["function"]["name"]
+                if tc.get("function", {}).get("arguments"):
+                    call["arguments"] += tc["function"]["arguments"]
 
-            # ✅ Handle tool calls safely
-            if "tool_calls" in delta:
-                for tool_call_raw in delta["tool_calls"]:
-                    tool_call = tool_call_raw.to_dict() if hasattr(tool_call_raw, "to_dict") else tool_call_raw
-                    tool_id = tool_call.get("id", "tool_call")
-                    function = tool_call.get("function", {})
-                    tool_name = function.get("name", "")
-                    arguments = function.get("arguments", "")
+            if "content" in delta and delta["content"] is not None:
+                text_content += delta["content"]
 
-                    print(json.dumps({
+            if finish_reason == "tool_calls":
+                for tc in tool_calls.values():
+                    emit({
                         "type": "response.output_item.done",
                         "item": {
                             "type": "function_call",
-                            "id": tool_id,
-                            "name": tool_name,
-                            "arguments": arguments
-                        }
-                    }), flush=True)
+                            "id": tc["id"],
+                            "name": tc["name"],
+                            "arguments": tc["arguments"],
+                        },
+                    })
+                    final_output.append({
+                        "type": "function_call",
+                        "id": tc["id"],
+                        "name": tc["name"],
+                        "arguments": tc["arguments"],
+                    })
 
-            # ✅ Handle content
-            content_piece = delta.get("content")
-            if content_piece is not None:
-                full_content += content_piece
-                #print(json.dumps({
-                #    "type": "response.output_item.done",
-                #    "item": {
-                #        "type": "message",
-                #        "role": "assistant",
-                #        "content": [
-                #            { "type": "output_text", "text": content_piece }
-                #        ]
-                #    }
-                #}), flush=True)
-
-        if not full_content:
-            raise Exception("No content accumulated from stream")
-
-        # Final signal that the response is complete
-        print(json.dumps({
-            "type": "response.completed",
-            "response": {
-                "id": "final",
-                "status": "completed",
-                "output": [
-                    {
+            if finish_reason == "stop":
+                emit({
+                    "type": "response.output_item.done",
+                    "item": {
                         "type": "message",
                         "role": "assistant",
-                        "content": [
-                            { "type": "output_text", "text": full_content }
-                        ]
-                    }
-                ]
-            }
-        }), flush=True)
+                        "content": [{"type": "output_text", "text": text_content}],
+                    },
+                })
+                final_output.append({
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": text_content}],
+                })
+
+        if not final_output:
+            raise Exception("No output received from model")
+
+        emit({
+            "type": "response.completed",
+            "response": {"id": resp_id, "status": "completed", "output": final_output},
+        })
 
     except Exception as e:
         log(f"[ERROR] During LLM call or output formatting: {str(e)}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
