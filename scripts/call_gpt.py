@@ -1,5 +1,6 @@
-import sys
+#!/usr/bin/env python3
 import json
+import sys
 import asyncio
 import uuid
 from invoke_llm import InvokeGPT
@@ -20,52 +21,92 @@ def convert_input_messages(raw_input):
         for msg in raw_input
     ]
 
-def wrap_tool_definition(tool):
-    if tool.get("type") == "function" and "name" in tool:
-        return {
-            "type": "function",
-            "function": {
-                "name": tool["name"],
-                "description": tool.get("description", ""),
-                "parameters": tool.get("parameters", {})
-            }
-        }
-    return tool
+import subprocess
 
-def log(msg):
+from invoke_llm import InvokeGPT
+
+def log(msg: str) -> None:
     with open("log.out", "a") as f:
-        f.write(msg + '\n')
+        f.write(msg + "\n")
 
 def gen_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
 async def main():
-    input_data_str = sys.stdin.read()
-    with open("log.in", "w") as f:
-        f.write("Input JSON:\n" + input_data_str + "\n")
+    open("log.out", "w").close()
+    data_str = sys.stdin.read()
+    if not data_str:
+        sys.stderr.write("Expected request JSON on stdin\n")
+        return
     log("[✓] Read input data from stdin")
-    log(input_data_str + "\n")    
-
+    log(data_str)
     try:
-        input_data = json.loads(input_data_str)
+        request = json.loads(data_str)
         log("[✓] Parsed JSON successfully")
     except Exception as e:
-        log(f"[ERROR] JSON parsing failed: {str(e)}")
+        log(f"[ERROR] JSON parsing failed: {e}")
+        sys.stderr.write("Expected request JSON on stdin\n")
         return
+    instructions = request.get("instructions", "")
+    messages = [
+        {"role": "system", "content": instructions}
+    ]
+    for item in request.get("input", []):
+        if item.get("role") == "user":
+            for part in item.get("content", []):
+                if isinstance(part, dict) and part.get("type") == "input_text":
+                    messages.append({"role": "user", "content": part.get("text", "")})
+                    break
+    log("[✓] Built message list")
 
-    input_messages_raw = input_data.get("input", [])
-    messages = convert_input_messages(input_messages_raw)
-    instructions = input_data.get("instructions", "").strip()
-    messages.insert(0, { "role": "system", "content": instructions })
+    gpt = InvokeGPT()
+    chat_resp = await gpt.get_response(
+        messages,
+        tools=request.get("tools"),
+        model=request.get("model"),
+    )
+    log("[✓] Received base reply")
 
-    tools = input_data.get("tools", [])
-    wrapped_tools = [wrap_tool_definition(tool) for tool in tools]
+    resp_id = "resp_mock"
+    msg_id = "msg_1"
 
-    model = input_data.get("model", "gpt-4")
-    tool_choice = input_data.get("tool_choice", "auto")
+    call = chat_resp["choices"][0]["message"]["tool_calls"][0]
+    func_id = call["id"]
+    call_id = call["id"]
+    args = call["function"]["arguments"]
 
-    log(f"[✓] Sending request to model={model}")
-    log(f"[✓] Messages:\n{json.dumps(messages, indent=2)}")
+    async def emit(evt):
+        log(f"[→] {evt.get('type')}")
+        print(json.dumps(evt), flush=True)
+        await asyncio.sleep(0.05)
+
+    await emit({"type": "response.created", "response": {"id": resp_id, "status": "in_progress"}})
+    await emit({"type": "response.in_progress", "response": {"id": resp_id, "status": "in_progress"}})
+
+    await emit({
+        "type": "response.output_item.added",
+        "output_index": 0,
+        "item": {"type": "function_call", "id": func_id, "status": "in_progress", "call_id": call_id, "name": "shell", "arguments": ""},
+    })
+    await emit({
+        "type": "response.function_call_arguments.delta",
+        "item_id": func_id,
+        "output_index": 0,
+        "content_index": 0,
+        "delta": args,
+    })
+    await emit({
+        "type": "response.function_call_arguments.done",
+        "item_id": func_id,
+        "output_index": 0,
+        "content_index": 0,
+        "arguments": args,
+    })
+    await emit({
+        "type": "response.output_item.done",
+        "output_index": 0,
+        "item": {"type": "function_call", "id": func_id, "status": "completed", "call_id": call_id, "name": "shell", "arguments": args},
+    })
 
     try:
         stream = await llm.get_response(
@@ -159,6 +200,7 @@ async def main():
 
     except Exception as e:
         log(f"[ERROR] During LLM call or output formatting: {str(e)}")
+
 
 
 if __name__ == "__main__":

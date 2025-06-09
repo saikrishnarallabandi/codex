@@ -53,7 +53,8 @@ class InvokeGPT:
         if not openai.api_key:
             openai.api_key = os.environ.get("OPENAI_API_KEY", "")
 
-    async def get_response(self, messages=None, tools=None, stream=False, tool_choice="auto", model=None):
+
+    def get_response(self, messages=None, tools=None, stream=False, tool_choice="auto", model=None):
 
         with open("log.out", "a") as f:
             f.write("Starting get_response in InvokeGPT\n")
@@ -64,7 +65,7 @@ class InvokeGPT:
 
         wrapped_tools = [wrap_tool_definition(t) for t in tools] if tools else None
 
-        response = await openai.ChatCompletion.acreate(
+        response = openai.chat.completions.create(
             model=self.model if model is None else model,
             messages=messages,
             tools=wrapped_tools,
