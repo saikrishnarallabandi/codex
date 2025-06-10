@@ -297,7 +297,7 @@ const createCompletion = (input: ResponseCreateInput) => {
     user: input.user,
     metadata: input.metadata,
   };
-
+  log(`Calling custom LLM with input: ${JSON.stringify(chatInput, null, 2)}`);
   return callCustomLLM(chatInput);
 };
 
@@ -312,13 +312,15 @@ async function responsesCreateViaChatCompletions(
   input: ResponseCreateInput,
 ): Promise<ResponseOutput | AsyncGenerator<ResponseEvent>> {
   const completion = await createCompletion(input);
-  log(`Input Streaming: ${input.stream}`);
+  log(`Created chat completion for response with model: ${input.model}`);
   if (input.stream) {
+    log("Processing streaming response");
     return streamResponses(
       input,
       completion as AsyncIterable<OpenAI.ChatCompletionChunk>,
     );
   } else {
+    log("Processing non-streaming response");
     return nonStreamResponses(
       input,
       completion as unknown as OpenAI.Chat.Completions.ChatCompletion,
@@ -458,6 +460,7 @@ async function* streamResponses(
   input: ResponseCreateInput,
   completion: AsyncIterable<OpenAI.ChatCompletionChunk>,
 ): AsyncGenerator<ResponseEvent> {
+  log("Starting streamResponses");
   const fullMessages = getFullMessages(input);
 
   const responseId = generateId("resp");
@@ -493,13 +496,15 @@ async function* streamResponses(
     metadata: input.metadata ?? {},
     output_text: "",
   };
+  log("[Stream Responses] Yielding response.created and response.in_progress events");
   yield { type: "response.created", response: initialResponse };
   yield { type: "response.in_progress", response: initialResponse };
   let isToolCall = false;
   for await (const chunk of completion as AsyncIterable<OpenAI.ChatCompletionChunk>) {
-    // console.error('\nCHUNK: ', JSON.stringify(chunk));
+    log(`[Stream Responses] Received chunk: ${JSON.stringify(chunk)}`);
     const choice = chunk.choices?.[0];
     if (!choice) {
+      log("[Stream Responses] No choice in chunk, skipping");
       continue;
     }
     if (
@@ -508,7 +513,9 @@ async function* streamResponses(
         choice.finish_reason === "tool_calls")
     ) {
       isToolCall = true;
+      log("[Stream Responses] Detected tool call in chunk");
     }
+    log(`[Stream Responses] Tool call status: ${isToolCall}`);
 
     if (chunk.usage) {
       usage = {
@@ -520,8 +527,10 @@ async function* streamResponses(
         output_tokens: chunk.usage.completion_tokens,
         output_tokens_details: { reasoning_tokens: 0 },
       };
+      log(`[Stream Responses] Updated usage: ${JSON.stringify(usage)}`);
     }
     if (isToolCall) {
+      log("[Stream Responses] Processing tool call chunk");
       for (const tcDelta of choice.delta.tool_calls || []) {
         const tcIndex = tcDelta.index;
         const content_index = textContentAdded ? tcIndex + 1 : tcIndex;
@@ -530,6 +539,7 @@ async function* streamResponses(
           // New tool call
           const toolCallId = tcDelta.id || generateId("call");
           const functionName = tcDelta.function?.name || "";
+          log(`[Stream Responses] Adding new tool call: id=${toolCallId}, name=${functionName}, index=${tcIndex}`);
 
           yield {
             type: "response.output_item.added",
@@ -554,6 +564,7 @@ async function* streamResponses(
           const current = toolCalls.get(tcIndex);
           if (current) {
             current.arguments += tcDelta.function.arguments;
+            log(`[Stream Responses] Appending arguments to tool call ${current.id}: ${tcDelta.function.arguments}`);
             yield {
               type: "response.function_call_arguments.delta",
               item_id: outputItemId,
@@ -566,6 +577,7 @@ async function* streamResponses(
       }
 
       if (choice.finish_reason === "tool_calls") {
+        log("[Stream Responses] Tool call finish detected, yielding done events");
         for (const [tcIndex, tc] of toolCalls) {
           const item = {
             type: "function_call",
@@ -590,10 +602,12 @@ async function* streamResponses(
           finalOutputItem.push(item as unknown as ResponseContentOutput);
         }
       } else {
+        log("Tool call not finished, continuing");
         continue;
       }
     } else {
       if (!textContentAdded) {
+        log("Adding initial content_part for output_text");
         yield {
           type: "response.content_part.added",
           item_id: outputItemId,
@@ -604,6 +618,7 @@ async function* streamResponses(
         textContentAdded = true;
       }
       if (choice.delta.content?.length) {
+        log(`Appending output_text delta: ${choice.delta.content}`);
         yield {
           type: "response.output_text.delta",
           item_id: outputItemId,
@@ -614,6 +629,7 @@ async function* streamResponses(
         textContent += choice.delta.content;
       }
       if (choice.finish_reason) {
+        log("Output_text finish detected, yielding done events");
         yield {
           type: "response.output_text.done",
           item_id: outputItemId,
@@ -644,11 +660,13 @@ async function* streamResponses(
         };
         finalOutputItem.push(item as unknown as ResponseContentOutput);
       } else {
+        log("Output_text not finished, continuing");
         continue;
       }
     }
 
     // Construct final response
+    log("Constructing final response for response.completed event");
     const finalResponse: ResponseOutput = {
       id: responseId,
       object: "response" as const,
@@ -709,15 +727,19 @@ async function* streamResponses(
       // Use type assertion with the defined type
       (assistantMessage as AssistantMessageWithToolCalls).tool_calls =
         toolCallsArray;
+      log(`Added tool_calls to assistantMessage: ${JSON.stringify(toolCallsArray)}`);
     }
     const newHistory = [...fullMessages, assistantMessage];
     conversationHistories.set(responseId, {
       previous_response_id: input.previous_response_id ?? null,
       messages: newHistory,
     });
+    log("Updated conversationHistories with new assistant message");
 
     yield { type: "response.completed", response: finalResponse };
+    log("Yielded response.completed event");
   }
+  log("streamResponses generator finished");
 }
 
 

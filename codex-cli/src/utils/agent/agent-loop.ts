@@ -805,8 +805,7 @@ export class AgentLoop {
                     this.oai.responses.create(params)
                 : (params: ResponseCreateParams) =>
                     responsesCreateViaChatCompletions(
-                      this.oai,
-                      params as ResponseCreateParams & { stream: true },
+                      params as ResponseCreateParams & { stream: true }
                     );
             log(
               `instructions (length ${mergedInstructions.length}): ${mergedInstructions}`,
@@ -1193,7 +1192,6 @@ export class AgentLoop {
                       this.oai.responses.create(params)
                   : (params: ResponseCreateParams) =>
                       responsesCreateViaChatCompletions(
-                        this.oai,
                         params as ResponseCreateParams & { stream: true },
                       );
 

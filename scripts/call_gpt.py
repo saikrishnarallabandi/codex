@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+import asyncio
 import uuid
 from invoke_llm import InvokeGPT
 
@@ -50,7 +51,7 @@ def log(msg: str) -> None:
 def gen_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
-def main():
+async def main():
     open("log.out", "w").close()
 
     if not os.environ.get("OPENAI_API_KEY"):
@@ -83,15 +84,15 @@ def main():
 
 
     try:
-        response = llm.get_response(
+        stream = llm.get_response(
             messages,
             tools=wrapped_tools,
-            stream=False,
+            stream=True,
             tool_choice=tool_choice,
             model=model,
         )
 
-        log("[✓] Received response")
+        log("[✓] Started response stream")
 
         resp_id = gen_id("resp")
 
@@ -101,53 +102,78 @@ def main():
 
         emit({"type": "response.created", "response": {"id": resp_id, "status": "in_progress"}})
         emit({"type": "response.in_progress", "response": {"id": resp_id, "status": "in_progress"}})
+        for chunk in stream:
+            if hasattr(chunk, "to_dict"):
+                chunk = chunk.to_dict()
 
-        if hasattr(response, "to_dict"):
-            response = response.to_dict()
-
-        log(f"[→] Response: {repr(response)}")
-
-        choice = response.get("choices", [{}])[0]
-        message = choice.get("message", {})
-
-        tool_calls = message.get("tool_calls", [])
-        content = message.get("content")
-
+            log(f"[→] Chunk: {repr(chunk)}")
+            
+            emit(chunk)
+        '''
+        tool_calls = {}
+        text_content = ""
         final_output = []
 
-        for tc in tool_calls:
-            emit({
-                "type": "response.output_item.done",
-                "item": {
-                    "type": "function_call",
+        for chunk in stream:
+            if hasattr(chunk, "to_dict"):
+                chunk = chunk.to_dict()
+
+            log(f"[→] Chunk: {repr(chunk)}")
+            
+
+            choice = chunk.get("choices", [{}])[0]
+            delta = choice.get("delta", {})
+            finish_reason = choice.get("finish_reason")
+
+            for tc in delta.get("tool_calls", []):
+                idx = tc.get("index", 0)
+                call = tool_calls.setdefault(idx, {
                     "id": tc.get("id", gen_id("call")),
                     "name": tc.get("function", {}).get("name", ""),
-                    "arguments": tc.get("function", {}).get("arguments", ""),
-                },
-            })
-            final_output.append({
-                "type": "function_call",
-                "id": tc.get("id", gen_id("call")),
-                "name": tc.get("function", {}).get("name", ""),
-                "arguments": tc.get("function", {}).get("arguments", ""),
-            })
+                    "arguments": "",
+                })
+                if tc.get("function", {}).get("name"):
+                    call["name"] = tc["function"]["name"]
+                if tc.get("function", {}).get("arguments"):
+                    call["arguments"] += tc["function"]["arguments"]
 
-        if content:
-            emit({
-                "type": "response.output_item.done",
-                "item": {
+            if "content" in delta and delta["content"] is not None:
+                text_content += delta["content"]
+
+            if finish_reason == "tool_calls":
+                for tc in tool_calls.values():
+                    emit({
+                        "type": "response.output_item.done",
+                        "item": {
+                            "type": "function_call",
+                            "id": tc["id"],
+                            "name": tc["name"],
+                            "arguments": tc["arguments"],
+                        },
+                    })
+                    final_output.append({
+                        "type": "function_call",
+                        "id": tc["id"],
+                        "name": tc["name"],
+                        "arguments": tc["arguments"],
+                    })
+
+            if finish_reason == "stop" and text_content:
+                emit({
+                    "type": "response.output_item.done",
+                    "item": {
+                        "type": "message",
+                        "id": gen_id("msg"),
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": text_content}],
+                    },
+                })
+                final_output.append({
                     "type": "message",
                     "id": gen_id("msg"),
                     "role": "assistant",
-                    "content": [{"type": "output_text", "text": content}],
-                },
-            })
-            final_output.append({
-                "type": "message",
-                "id": gen_id("msg"),
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": content}],
-            })
+                    "content": [{"type": "output_text", "text": text_content}],
+                })
 
         if not final_output:
             raise Exception("No output received from model")
@@ -156,6 +182,7 @@ def main():
             "type": "response.completed",
             "response": {"id": resp_id, "status": "completed", "output": final_output},
         })
+        '''
 
     except Exception as e:
         log(f"[ERROR] During LLM call or output formatting: {str(e)}")
@@ -163,4 +190,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
