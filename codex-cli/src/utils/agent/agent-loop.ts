@@ -1,4 +1,3 @@
-
 import type { ReviewDecision } from "./review.js";
 import type { ApplyPatchCommand, ApprovalPolicy } from "../../approvals.js";
 import type { AppConfig } from "../config.js";
@@ -23,10 +22,7 @@ import {
 } from "../config.js";
 import { log } from "../logger/log.js";
 import { parseToolCallArguments } from "../parsers.js";
-import { 
-  responsesCreateViaChatCompletions, 
-  callCustomLLM 
-} from "../responses.js";
+import { responsesCreateViaChatCompletions } from "../responses.js";
 import {
   ORIGIN,
   getSessionId,
@@ -132,6 +128,7 @@ export class AgentLoop {
   // type to avoid sprinkling `any` across the implementation while still allowing paths where
   // the OpenAI SDK types may not perfectly match. The `typeof OpenAI` pattern captures the
   // instance shape without resorting to `any`.
+  private oai: OpenAI;
 
   private onItem: (item: ResponseItem) => void;
   private onLoading: (loading: boolean) => void;
@@ -312,7 +309,13 @@ export class AgentLoop {
     const apiKey = this.config.apiKey ?? process.env["OPENAI_API_KEY"] ?? "";
     const baseURL = getBaseUrl(this.provider);
 
-    const oaiConfig = {
+    this.oai = new OpenAI({
+      // The OpenAI JS SDK only requires `apiKey` when making requests against
+      // the official API.  When running unit‑tests we stub out all network
+      // calls so an undefined key is perfectly fine.  We therefore only set
+      // the property if we actually have a value to avoid triggering runtime
+      // errors inside the SDK (it validates that `apiKey` is a non‑empty
+      // string when the field is present).
       ...(apiKey ? { apiKey } : {}),
       baseURL,
       defaultHeaders: {
@@ -326,16 +329,25 @@ export class AgentLoop {
       },
       httpAgent: PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : undefined,
       ...(timeoutMs !== undefined ? { timeout: timeoutMs } : {}),
-    };
+    });
 
     if (this.provider.toLowerCase() === "azure") {
-      new AzureOpenAI({
-        ...oaiConfig,
+      this.oai = new AzureOpenAI({
         apiKey,
+        baseURL,
         apiVersion: AZURE_OPENAI_API_VERSION,
+        defaultHeaders: {
+          originator: ORIGIN,
+          version: CLI_VERSION,
+          session_id: this.sessionId,
+          ...(OPENAI_ORGANIZATION
+            ? { "OpenAI-Organization": OPENAI_ORGANIZATION }
+            : {}),
+          ...(OPENAI_PROJECT ? { "OpenAI-Project": OPENAI_PROJECT } : {}),
+        },
+        httpAgent: PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : undefined,
+        ...(timeoutMs !== undefined ? { timeout: timeoutMs } : {}),
       });
-    } else {
-      new OpenAI(oaiConfig);
     }
 
     setSessionId(this.sessionId);
@@ -445,7 +457,6 @@ export class AgentLoop {
         this.execAbortController?.signal,
       );
       outputItem.output = JSON.stringify({ output: outputText, metadata });
-      log(`Output from exec: ${outputItem.output}`);
 
       if (additionalItemsFromExec) {
         additionalItems.push(...additionalItemsFromExec);
@@ -789,11 +800,12 @@ export class AgentLoop {
 
             const responseCall =
               !this.config.provider ||
-              this.config.provider?.toLowerCase() === "cody"
+              this.config.provider?.toLowerCase() === "openai"
                 ? (params: ResponseCreateParams) =>
-                    callCustomLLM(params)
+                    this.oai.responses.create(params)
                 : (params: ResponseCreateParams) =>
                     responsesCreateViaChatCompletions(
+                      this.oai,
                       params as ResponseCreateParams & { stream: true },
                     );
             log(
@@ -1176,13 +1188,14 @@ export class AgentLoop {
 
               const responseCall =
                 !this.config.provider ||
-                this.config.provider?.toLowerCase() === "cody"
+                this.config.provider?.toLowerCase() === "openai"
                   ? (params: ResponseCreateParams) =>
-                      callCustomLLM(params)
-                : (params: ResponseCreateParams) =>
-                    responsesCreateViaChatCompletions(
-                      params as ResponseCreateParams & { stream: true },
-                    );
+                      this.oai.responses.create(params)
+                  : (params: ResponseCreateParams) =>
+                      responsesCreateViaChatCompletions(
+                        this.oai,
+                        params as ResponseCreateParams & { stream: true },
+                      );
 
               log(
                 "agentLoop.run(): responseCall(1): turnInput: " +
@@ -1641,8 +1654,8 @@ You MUST adhere to the following criteria when executing the task:
 - When your task involves writing or modifying files:
     - Do NOT tell the user to "save the file" or "copy the code into a file" if you already created or modified the file using \`apply_patch\`. Instead, reference the file as already saved.
     - Do NOT show the full contents of large files you have already written, unless the user explicitly asks for them.
-`
-// ${dynamicPrefix}`;
+
+${dynamicPrefix}`;
 
 function filterToApiMessages(
   items: Array<ResponseInputItem>,
