@@ -2,7 +2,6 @@
 import json
 import os
 import sys
-import asyncio
 import uuid
 from invoke_llm import InvokeGPT
 
@@ -17,7 +16,8 @@ def convert_input_messages(raw_input):
             text = "".join(
                 p.get("text", "")
                 for p in parts
-                if isinstance(p, dict) and p.get("type") == "input_text"
+                if isinstance(p, dict)
+                and p.get("type") in {"input_text", "output_text"}
             )
             messages.append({"role": item.get("role"), "content": text})
         elif item.get("type") == "function_call_output":
@@ -31,6 +31,18 @@ def convert_input_messages(raw_input):
     return messages
 
 
+def build_messages(request):
+    """Return a message list from the request payload."""
+    if "messages" in request:
+        return request["messages"]
+
+    instructions = request.get("instructions", "")
+    messages = convert_input_messages(request.get("input", []))
+    if instructions:
+        messages.insert(0, {"role": "system", "content": instructions})
+    return messages
+
+
 def log(msg: str) -> None:
     with open("log.out", "a") as f:
         f.write(msg + "\n")
@@ -38,7 +50,7 @@ def log(msg: str) -> None:
 def gen_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
-async def main():
+def main():
     open("log.out", "w").close()
 
     if not os.environ.get("OPENAI_API_KEY"):
@@ -59,10 +71,7 @@ async def main():
         log(f"[ERROR] JSON parsing failed: {e}")
         sys.stderr.write("Expected request JSON on stdin\n")
         return
-    instructions = request.get("instructions", "")
-    messages = convert_input_messages(request.get("input", []))
-    if instructions:
-        messages.insert(0, {"role": "system", "content": instructions})
+    messages = build_messages(request)
     log("[✓] Built message list")
     log(f"Messages: {json.dumps(messages, indent=4)}")
 
@@ -74,15 +83,15 @@ async def main():
 
 
     try:
-        stream = llm.get_response(
+        response = llm.get_response(
             messages,
             tools=wrapped_tools,
-            stream=True,
+            stream=False,
             tool_choice=tool_choice,
             model=model,
         )
 
-        log("[✓] Started response stream")
+        log("[✓] Received response")
 
         resp_id = gen_id("resp")
 
@@ -93,69 +102,52 @@ async def main():
         emit({"type": "response.created", "response": {"id": resp_id, "status": "in_progress"}})
         emit({"type": "response.in_progress", "response": {"id": resp_id, "status": "in_progress"}})
 
-        tool_calls = {}
-        text_content = ""
+        if hasattr(response, "to_dict"):
+            response = response.to_dict()
+
+        log(f"[→] Response: {repr(response)}")
+
+        choice = response.get("choices", [{}])[0]
+        message = choice.get("message", {})
+
+        tool_calls = message.get("tool_calls", [])
+        content = message.get("content")
+
         final_output = []
 
-        for chunk in stream:
-            if hasattr(chunk, "to_dict"):
-                chunk = chunk.to_dict()
-
-            log(f"[→] Chunk: {repr(chunk)}")
-
-            choice = chunk.get("choices", [{}])[0]
-            delta = choice.get("delta", {})
-            finish_reason = choice.get("finish_reason")
-
-            for tc in delta.get("tool_calls", []):
-                idx = tc.get("index", 0)
-                call = tool_calls.setdefault(idx, {
+        for tc in tool_calls:
+            emit({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "function_call",
                     "id": tc.get("id", gen_id("call")),
                     "name": tc.get("function", {}).get("name", ""),
-                    "arguments": "",
-                })
-                if tc.get("function", {}).get("name"):
-                    call["name"] = tc["function"]["name"]
-                if tc.get("function", {}).get("arguments"):
-                    call["arguments"] += tc["function"]["arguments"]
+                    "arguments": tc.get("function", {}).get("arguments", ""),
+                },
+            })
+            final_output.append({
+                "type": "function_call",
+                "id": tc.get("id", gen_id("call")),
+                "name": tc.get("function", {}).get("name", ""),
+                "arguments": tc.get("function", {}).get("arguments", ""),
+            })
 
-            if "content" in delta and delta["content"] is not None:
-                text_content += delta["content"]
-
-            if finish_reason == "tool_calls":
-                for tc in tool_calls.values():
-                    emit({
-                        "type": "response.output_item.done",
-                        "item": {
-                            "type": "function_call",
-                            "id": tc["id"],
-                            "name": tc["name"],
-                            "arguments": tc["arguments"],
-                        },
-                    })
-                    final_output.append({
-                        "type": "function_call",
-                        "id": tc["id"],
-                        "name": tc["name"],
-                        "arguments": tc["arguments"],
-                    })
-
-            if finish_reason == "stop" and text_content:
-                emit({
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "message",
-                        "id": gen_id("msg"),
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": text_content}],
-                    },
-                })
-                final_output.append({
+        if content:
+            emit({
+                "type": "response.output_item.done",
+                "item": {
                     "type": "message",
                     "id": gen_id("msg"),
                     "role": "assistant",
-                    "content": [{"type": "output_text", "text": text_content}],
-                })
+                    "content": [{"type": "output_text", "text": content}],
+                },
+            })
+            final_output.append({
+                "type": "message",
+                "id": gen_id("msg"),
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": content}],
+            })
 
         if not final_output:
             raise Exception("No output received from model")
@@ -171,4 +163,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
