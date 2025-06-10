@@ -74,6 +74,17 @@ export function exec(
     StdioPipe
   > = {
     ...options,
+    // Use a shell on Unix-like systems so built-ins like `ls` work even when
+    // not available as standalone executables.  Resolve the shell via PATH so
+    // environments lacking `/bin/sh` still function. On Windows, the
+    // command is already adapted to run via `cmd.exe` when necessary so we
+    // avoid forcing a shell here.
+    shell:
+      options.shell !== undefined
+        ? options.shell
+        : process.platform === "win32"
+          ? undefined
+          : process.env.SHELL || "sh",
     // Inherit any caller‑supplied stdio flags but force stdin to "ignore" so
     // the child never attempts to read from us (see lengthy comment above).
     stdio: ["ignore", "pipe", "pipe"],
