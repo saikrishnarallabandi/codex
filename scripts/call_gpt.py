@@ -10,13 +10,25 @@ from invoke_llm import InvokeGPT
 open("log.out", "w").close()
 
 def convert_input_messages(raw_input):
-    return [
-        {
-            "role": msg["role"],
-            "content": next((c["text"] for c in msg["content"] if c["type"] == "input_text"), "")
-        }
-        for msg in raw_input
-    ]
+    messages = []
+    for item in raw_input:
+        if item.get("type") == "message":
+            parts = item.get("content", [])
+            text = "".join(
+                p.get("text", "")
+                for p in parts
+                if isinstance(p, dict) and p.get("type") == "input_text"
+            )
+            messages.append({"role": item.get("role"), "content": text})
+        elif item.get("type") == "function_call_output":
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": item.get("call_id"),
+                    "content": item.get("output", ""),
+                }
+            )
+    return messages
 
 
 def log(msg: str) -> None:
@@ -48,15 +60,9 @@ async def main():
         sys.stderr.write("Expected request JSON on stdin\n")
         return
     instructions = request.get("instructions", "")
-    messages = [
-        {"role": "system", "content": instructions}
-    ]
-    for item in request.get("input", []):
-        if item.get("role") == "user":
-            for part in item.get("content", []):
-                if isinstance(part, dict) and part.get("type") == "input_text":
-                    messages.append({"role": "user", "content": part.get("text", "")})
-                    break
+    messages = convert_input_messages(request.get("input", []))
+    if instructions:
+        messages.insert(0, {"role": "system", "content": instructions})
     log("[✓] Built message list")
     log(f"Messages: {json.dumps(messages, indent=4)}")
 
