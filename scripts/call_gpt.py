@@ -38,7 +38,8 @@ async def main():
         sys.stderr.write("Expected request JSON on stdin\n")
         return
     log("[✓] Read input data from stdin")
-    log(data_str)
+    log(json.dumps(data_str, indent=4))
+    
     try:
         request = json.loads(data_str)
         log("[✓] Parsed JSON successfully")
@@ -57,6 +58,7 @@ async def main():
                     messages.append({"role": "user", "content": part.get("text", "")})
                     break
     log("[✓] Built message list")
+    log(f"Messages: {json.dumps(messages, indent=4)}")
 
     wrapped_tools = request.get("tools")
     tool_choice = request.get("tool_choice", "auto")

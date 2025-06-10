@@ -445,6 +445,7 @@ export class AgentLoop {
         this.execAbortController?.signal,
       );
       outputItem.output = JSON.stringify({ output: outputText, metadata });
+      log(`Output from exec: ${outputItem.output}`);
 
       if (additionalItemsFromExec) {
         additionalItems.push(...additionalItemsFromExec);
@@ -1640,8 +1641,8 @@ You MUST adhere to the following criteria when executing the task:
 - When your task involves writing or modifying files:
     - Do NOT tell the user to "save the file" or "copy the code into a file" if you already created or modified the file using \`apply_patch\`. Instead, reference the file as already saved.
     - Do NOT show the full contents of large files you have already written, unless the user explicitly asks for them.
-
-${dynamicPrefix}`;
+`
+// ${dynamicPrefix}`;
 
 function filterToApiMessages(
   items: Array<ResponseInputItem>,

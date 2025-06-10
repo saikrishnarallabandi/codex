@@ -306,6 +306,7 @@ async function responsesCreateViaChatCompletions(
   input: ResponseCreateInput,
 ): Promise<ResponseOutput | AsyncGenerator<ResponseEvent>> {
   const completion = await createCompletion(input);
+  log(`Input Streaming: ${input.stream}`);
   if (input.stream) {
     return streamResponses(
       input,
@@ -715,11 +716,15 @@ async function* streamResponses(
 
 
 function callCustomLLM(messages: unknown): AsyncIterable<unknown> {
+  log("Calling custom LLM with messages:" + JSON.stringify(messages, null, 2));
   const scriptPath = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
     "../../scripts/call_gpt.py",
   );
-  const child = spawn("python", [scriptPath]);
+  const child = spawn("python3", [scriptPath]);
+  child.stderr.on("data", (data) => {
+    log(`PYTHON STDERR: ${data.toString()}`);
+  });
   child.stdin.write(JSON.stringify(messages));
   child.stdin.end();
 
