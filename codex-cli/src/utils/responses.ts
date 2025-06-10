@@ -720,7 +720,9 @@ function callCustomLLM(messages: unknown): AsyncIterable<unknown> {
     "../../scripts/call_gpt.py",
   );
   const child = spawn("python", [scriptPath]);
-  child.stdin.write(JSON.stringify(messages));
+  const payload = JSON.stringify(messages);
+  log(`Sending payload to call_gpt.py: ${payload}`);
+  child.stdin.write(payload + "\n");
   child.stdin.end();
 
   const rl = createInterface({ input: child.stdout as Readable });

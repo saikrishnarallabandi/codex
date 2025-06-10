@@ -17,7 +17,8 @@ def convert_input_messages(raw_input):
             text = "".join(
                 p.get("text", "")
                 for p in parts
-                if isinstance(p, dict) and p.get("type") == "input_text"
+                if isinstance(p, dict)
+                and p.get("type") in {"input_text", "output_text"}
             )
             messages.append({"role": item.get("role"), "content": text})
         elif item.get("type") == "function_call_output":
@@ -28,6 +29,18 @@ def convert_input_messages(raw_input):
                     "content": item.get("output", ""),
                 }
             )
+    return messages
+
+
+def build_messages(request):
+    """Return a message list from the request payload."""
+    if "messages" in request:
+        return request["messages"]
+
+    instructions = request.get("instructions", "")
+    messages = convert_input_messages(request.get("input", []))
+    if instructions:
+        messages.insert(0, {"role": "system", "content": instructions})
     return messages
 
 
@@ -58,10 +71,7 @@ async def main():
         log(f"[ERROR] JSON parsing failed: {e}")
         sys.stderr.write("Expected request JSON on stdin\n")
         return
-    instructions = request.get("instructions", "")
-    messages = convert_input_messages(request.get("input", []))
-    if instructions:
-        messages.insert(0, {"role": "system", "content": instructions})
+    messages = build_messages(request)
     log("[✓] Built message list")
 
     wrapped_tools = request.get("tools")
