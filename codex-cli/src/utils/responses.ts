@@ -187,8 +187,12 @@ function generateId(prefix: string = "msg"): string {
 type ResponseInputItem = ResponseCreateInput["input"][number];
 
 function convertInputItemToMessage(
-  item: string | ResponseInputItem,
+  item: string | ResponseInputItem | undefined | null,
 ): OpenAI.Chat.Completions.ChatCompletionMessageParam {
+  if (item == null) {
+    throw new Error("Invalid input item: received null or undefined");
+  }
+
   // Handle string inputs as content for a user message
   if (typeof item === "string") {
     return { role: "user", content: item };
@@ -238,8 +242,10 @@ function getFullMessages(
 
   // Handle both string and ResponseInputItem in input.input
   const newInputMessages = Array.isArray(input.input)
-    ? input.input.map(convertInputItemToMessage)
-    : [convertInputItemToMessage(input.input)];
+    ? input.input.filter((itm) => itm != null).map(convertInputItemToMessage)
+    : input.input != null
+      ? [convertInputItemToMessage(input.input)]
+      : [];
 
   const messages = [...baseHistory, ...newInputMessages];
   if (
